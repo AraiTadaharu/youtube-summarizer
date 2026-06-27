@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube動画要約ツール</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f9f9f9;
+            display: flex;
+            justify-content: center;
+            padding: 40px 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #ff0000;
+            margin-bottom: 30px;
+        }
+        #drop-zone {
+            border: 3px dashed #ccc;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            color: #666;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            margin-bottom: 20px;
+            font-size: 1.1em;
+        }
+        #drop-zone.dragover {
+            border-color: #ff0000;
+            background-color: #fff5f5;
+            color: #ff0000;
+        }
+        #url-input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 1em;
+            min-height: 150px;
+            resize: vertical;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        #summarize-btn {
+            flex: 2;
+            padding: 15px;
+            background-color: #ff0000;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1.2em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        #summarize-btn:hover {
+            background-color: #cc0000;
+        }
+        #summarize-btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        #reset-btn {
+            flex: 1;
+            padding: 15px;
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1.2em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        #reset-btn:hover {
+            background-color: #5a6268;
+        }
+        #result-area {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 6px;
+            background-color: #f0f7ff;
+            border-left: 5px solid #007bff;
+            min-height: 100px;
+            white-space: pre-wrap;
+            line-height: 1.6;
+            display: none;
+        }
+        .loading {
+            text-align: center;
+            margin: 20px 0;
+            font-style: italic;
+            color: #666;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 YouTube 動画要約ツール</h1>
+        
+        <div id="drop-zone">ここにYouTube URLをドラッグ＆ドロップしてください</div>
+        <textarea id="url-input" placeholder="URLを入力してください（複数ある場合は1行に1つずつ）"></textarea>
+        
+        <div class="button-group">
+            <button id="summarize-btn">要約開始</button>
+            <button id="reset-btn">リセット</button>
+        </div>
+        
+        <div id="loading" class="loading">要約を作成中...しばらくお待ちください（1〜2分かかる場合があります）</div>
+        <div id="result-area"></div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const urlInput = document.getElementById('url-input');
+        const summarizeBtn = document.getElementById('summarize-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const resultArea = document.getElementById('result-area');
+        const loading = document.getElementById('loading');
+
+        // Drag & Drop handlers
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            
+            const text = e.dataTransfer.getData('text');
+            if (text) {
+                // Append to existing content if any, separated by newline
+                const currentVal = urlInput.value.trim();
+                urlInput.value = currentVal ? `${currentVal}\n${text}` : text;
+            }
+        });
+
+        // Reset action
+        resetBtn.addEventListener('click', () => {
+            if (confirm('入力をリセットしてよろしいですか？')) {
+                urlInput.value = '';
+                resultArea.textContent = '';
+                resultArea.style.display = 'none';
+            }
+        });
+
+        // Summarize action
+        summarizeBtn.addEventListener('click', async () => {
+            const rawInput = urlInput.value.trim();
+            if (!rawInput) {
+                alert('URLを入力してください');
+                return;
+            }
+
+            // Extract list of URLs (one per line, ignoring empty lines)
+            const urls = rawInput.split('\n')
+                                .map(u => u.trim())
+                                .filter(u => u !== '');
+
+            if (urls.length === 0) {
+                alert('有効なURLを入力してください');
+                return;
+            }
+
+            // UI State: Loading
+            summarizeBtn.disabled = true;
+            resetBtn.disabled = true;
+            loading.style.display = 'block';
+            resultArea.style.display = 'block';
+            resultArea.textContent = '処理を開始します...\n';
+
+            try {
+                for (let i = 0; i < urls.length; i++) {
+                    const url = urls[i];
+                    loading.textContent = `要約を作成中... (${i + 1} / ${urls.length}): ${url}`;
+                    
+                    try {
+                        const response = await fetch('/summarize', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url })
+                        });
+
+                        const data = await response.json();
+
+                        if (response.ok) {
+                            resultArea.textContent += `\n\n--------------------------------------------------\n` +
+                                                    `【${data.title}】\n` +
+                                                    `--------------------------------------------------\n` + 
+                                                    `${data.summary}\n`;
+                        } else {
+                            resultArea.textContent += `\n\n❌ エラー (${url}): ${data.error || '要約に失敗しました'}\n`;
+                        }
+                    } catch (error) {
+                        resultArea.textContent += `\n\n❌ 通信エラー (${url}): サーバーとの接続に失敗しました。\n`;
+                    }
+                }
+            } catch (globalError) {
+                alert('予期せぬエラーが発生しました。');
+            } finally {
+                summarizeBtn.disabled = false;
+                resetBtn.disabled = false;
+                loading.style.display = 'none';
+                loading.textContent = '要約を作成中...しばらくお待ちください（1〜2分かかる場合があります）';
+            }
+        });
+    </script>
+</body>
+</html>
