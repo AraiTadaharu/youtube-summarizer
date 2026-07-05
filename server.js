@@ -13,9 +13,18 @@ app.use(express.json());
 app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3000;
+
+// AI Provider Configuration
+const AI_PROVIDER = process.env.AI_PROVIDER || 'ollama'; // 'ollama' or 'lmstudio'
+
+// Ollama Settings
 const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma4:12b';
 const OLLAMA_CTX = parseInt(process.env.OLLAMA_CTX) || 65536;
+
+// LM Studio Settings
+const LM_STUDIO_HOST = process.env.LM_STUDIO_HOST || 'http://localhost:1234';
+const LM_STUDIO_MODEL = process.env.LM_STUDIO_MODEL || ''; // LM Studio often ignores the model name or uses any loaded model
 
 // Helper to extract video ID from YouTube URL
 function extractVideoId(url) {
@@ -60,31 +69,56 @@ function saveSummaryToFile(title, summary) {
     }
 }
 
-// Helper to call Ollama API
+// Helper to call LLM API
 async function callLLM(systemPrompt, userPrompt) {
-    const response = await fetch(`${OLLAMA_HOST}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: OLLAMA_MODEL,
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userPrompt }
-            ],
-            options: {
-                num_ctx: OLLAMA_CTX
-            },
-            stream: false,
-        })
-    });
+    if (AI_PROVIDER === 'lmstudio') {
+        // LM Studio uses OpenAI compatible API
+        const response = await fetch(`${LM_STUDIO_HOST}/v1/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: LM_STUDIO_MODEL,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
+                ],
+                stream: false,
+            })
+        });
 
-    if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(`Ollama APIエラー: ${response.status} ${errorData}`);
+        if (!response.ok) {
+            const errorData = await response.text();
+            throw new Error(`LM Studio APIエラー: ${response.status} ${errorData}`);
+        }
+
+        const data = await response.json();
+        return data.choices[0].message.content;
+    } else {
+        // Default to Ollama API
+        const response = await fetch(`${OLLAMA_HOST}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: OLLAMA_MODEL,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
+                ],
+                options: {
+                    num_ctx: OLLAMA_CTX
+                },
+                stream: false,
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.text();
+            throw new Error(`Ollama APIエラー: ${response.status} ${errorData}`);
+        }
+
+        const data = await response.json();
+        return data.message.content;
     }
-
-    const data = await response.json();
-    return data.message.content;
 }
 
 app.post('/summarize', async (req, res) => {
@@ -138,11 +172,15 @@ app.post('/summarize', async (req, res) => {
 
     } catch (error) {
         console.error('Error summarizing video:', error);
-        res.status(500).json({ error: '動画の要約に失敗しました。Ollamaサーバーが起動しているか、モデル名が正しいか確認してください。 詳細: ' + error.message });
+        res.status(500).json({ error: `動画の要約に失敗しました。${AI_PROVIDER === 'lmstudio' ? 'LM Studio' : 'Ollama'}サーバーが起動しているか、モデル名が正しいか確認してください。 詳細: ${error.message}` });
     }
 });
 
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
-    console.log(`Connecting to Ollama at: ${OLLAMA_HOST} (Model: ${OLLAMA_MODEL})`);
+    if (AI_PROVIDER === 'lmstudio') {
+        console.log(`Connecting to LM Studio at: ${LM_STUDIO_HOST} (Model: ${LM_STUDIO_MODEL || 'Default'})`);
+    } else {
+        console.log(`Connecting to Ollama at: ${OLLAMA_HOST} (Model: ${OLLAMA_MODEL})`);
+    }
 });
